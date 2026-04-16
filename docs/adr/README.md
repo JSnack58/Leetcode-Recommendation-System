@@ -19,5 +19,6 @@ We use [MADR 3.x](https://adr.github.io/madr/) (Markdown Architectural Decision 
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-use-madr-format.md) | Use MADR format for ADRs | Accepted |
+| [0002](0002-contest-scraping-approach.md) | Contest scraping approach | Accepted |
 
 <!-- Add new rows here as ADRs are created -->

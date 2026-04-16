@@ -25,6 +25,7 @@ dev = [
     "mypy>=1.6",
     "nbstripout>=0.6",      # Strip notebook outputs before commit
     "pandas-stubs>=2.0",
+    "types-requests>=2.31",
 ]
 advanced = [
     # Heavy GPU/DL deps — install only when needed

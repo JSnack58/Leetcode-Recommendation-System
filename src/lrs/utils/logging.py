@@ -1,7 +1,8 @@
 """Structured logging setup using loguru."""
 
-from loguru import logger
 import sys
+
+from loguru import logger
 
 from lrs import config
 

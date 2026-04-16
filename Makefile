@@ -1,4 +1,4 @@
-.PHONY: install install-advanced lint typecheck test train-baseline train-advanced evaluate notebook clean
+.PHONY: install install-advanced lint typecheck test scrape train-baseline train-advanced evaluate notebook clean
 
 # Install base dependencies
 install:
@@ -24,6 +24,16 @@ test:
 # Run tests with coverage report
 coverage:
 	uv run pytest tests/ --cov=lrs --cov-report=term-missing
+
+# Scrape contest data (usage: make scrape WEEKLY="380 400")
+WEEKLY ?=
+BIWEEKLY ?=
+CONTEST ?=
+scrape:
+	uv run python scripts/scrape_contests.py \
+	  $(if $(WEEKLY),--weekly $(WEEKLY)) \
+	  $(if $(BIWEEKLY),--biweekly $(BIWEEKLY)) \
+	  $(if $(CONTEST),--contest $(CONTEST))
 
 # Train a baseline model (usage: make train-baseline MODEL=svd)
 MODEL ?= svd

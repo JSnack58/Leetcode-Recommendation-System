@@ -3,7 +3,7 @@
 ## Phase 0: Data Collection & EDA
 **Goal**: Have a clean, analyzed dataset ready for modeling.
 
-- [ ] Implement LeetCode contest API scraper (`src/lrs/data/scraper.py`)
+- [x] Implement LeetCode contest API scraper (`src/lrs/data/scraper.py`) — see [ADR-0002](../adr/0002-contest-scraping-approach.md)
 - [ ] Scrape last 50 contests → target ~1M+ user-problem interactions
 - [ ] Build preprocessing pipeline (cleaning, type enforcement, joins)
 - [ ] EDA: user rating distribution, solve rates by tag, time-to-solve distributions

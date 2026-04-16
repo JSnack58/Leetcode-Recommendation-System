@@ -4,10 +4,10 @@ All paths and constants are defined here. Environment variables override default
 Load .env before importing this module (done automatically via python-dotenv).
 """
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -28,7 +28,35 @@ FEATURES_DIR = DATA_DIR / "features"
 # Scraping
 # ---------------------------------------------------------------------------
 
+# Optional session cookie for authenticated API requests. The public contest
+# ranking endpoint does NOT require this — it is only used when future
+# endpoints (e.g., user profile scraping) need auth.
 LEETCODE_SESSION: str = os.getenv("LEETCODE_SESSION", "")
+
+# Base URL for LeetCode API. Override to point at a local mock during tests.
+LEETCODE_BASE_URL: str = os.getenv("LEETCODE_BASE_URL", "https://leetcode.com")
+
+# User-Agent header. Identify this as a research project, not a generic bot.
+SCRAPE_USER_AGENT: str = os.getenv(
+    "SCRAPE_USER_AGENT",
+    "LRS-Research/0.1 (SJSU CMPE 256 term project; contact kayvaun.khoshkhou@sjsu.edu)",
+)
+
+# Rate limit — requests per second for the contest ranking endpoint.
+# Default 0.25 rps = 1 request every 4 seconds (conservative; see ADR-0002).
+SCRAPE_RATE_LIMIT_RPS: float = float(os.getenv("SCRAPE_RATE_LIMIT_RPS", "0.25"))
+
+# Max retries for transient HTTP failures (429, 5xx, network).
+SCRAPE_RETRY_MAX: int = int(os.getenv("SCRAPE_RETRY_MAX", "5"))
+
+# Exponential backoff base (seconds). Retry delay = base * (2 ** attempt) + jitter.
+SCRAPE_BACKOFF_BASE_SEC: float = float(os.getenv("SCRAPE_BACKOFF_BASE_SEC", "2.0"))
+
+# Per-request timeout (seconds).
+SCRAPE_TIMEOUT_SEC: float = float(os.getenv("SCRAPE_TIMEOUT_SEC", "30.0"))
+
+# Entries per contest ranking page (LeetCode's fixed page size).
+CONTEST_PAGE_SIZE: int = 25
 
 # ---------------------------------------------------------------------------
 # Training
