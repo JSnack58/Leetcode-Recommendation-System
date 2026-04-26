@@ -1,3 +1,15 @@
+# TEAM SCRAPING INSTRUCTIONS
+# Each machine needs its own .env.scraper with its own LeetCode credentials.
+# See .env.scraper for the required variables and how to get them from Chrome DevTools.
+#
+# 3-way split (run one command per machine from the project root):
+#   Machine 1:  python -m scripts.data_collection.run --from 180 --to 121
+#   Machine 2:  python -m scripts.data_collection.run --from 120 --to 61
+#   Machine 3:  python -m scripts.data_collection.run --from 60  --to 0
+#
+# If a run is interrupted, re-run the same command — already-scraped pages are skipped.
+# To re-scrape a range from scratch: add --force
+
 import argparse
 from pathlib import Path
 
