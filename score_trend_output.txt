@@ -1,0 +1,58 @@
+Loading data from combined_contest_data.jsonl...
+Processed 500000 records...
+Processed 1000000 records...
+Processed 1500000 records...
+Processed 2000000 records...
+Processed 2500000 records...
+Processed 3000000 records...
+Data loaded. Analyzing trends...
+
+==================================================
+TREND 1: Average Score by Total Number of Contests
+Do more active users generally score higher?
+==================================================
+Users with  1 total contests (N= 371958): Avg Score = 2.00
+Users with  2 total contests (N= 138152): Avg Score = 3.05
+Users with  3 total contests (N=  79346): Avg Score = 3.61
+Users with  4 total contests (N=  53693): Avg Score = 3.99
+Users with  5 total contests (N=  39141): Avg Score = 4.30
+Users with  6 total contests (N=  29668): Avg Score = 4.52
+Users with  7 total contests (N=  23241): Avg Score = 4.73
+Users with  8 total contests (N=  18485): Avg Score = 4.93
+Users with  9 total contests (N=  15052): Avg Score = 5.06
+Users with 10 total contests (N=  12245): Avg Score = 5.22
+Users with 11 total contests (N=  10456): Avg Score = 5.40
+Users with 12 total contests (N=   8691): Avg Score = 5.50
+Users with 13 total contests (N=   7393): Avg Score = 5.62
+Users with 14 total contests (N=   6283): Avg Score = 5.73
+Users with 15 total contests (N=   5341): Avg Score = 5.77
+Users with 16 total contests (N=   4525): Avg Score = 5.88
+Users with 17 total contests (N=   3864): Avg Score = 5.88
+Users with 18 total contests (N=   3431): Avg Score = 6.00
+Users with 19 total contests (N=   2927): Avg Score = 6.08
+Users with 20+ total contests (N=  22382): Avg Score = 6.75
+
+==================================================
+TREND 2: Average Score on User's N-th Contest
+Does a user's score improve as they do more contests?
+==================================================
+Score on contest # 1 (N= 856274): Avg Score = 2.78
+Score on contest # 2 (N= 484316): Avg Score = 3.82
+Score on contest # 3 (N= 346164): Avg Score = 4.43
+Score on contest # 4 (N= 266818): Avg Score = 4.86
+Score on contest # 5 (N= 213125): Avg Score = 5.20
+Score on contest # 6 (N= 173984): Avg Score = 5.51
+Score on contest # 7 (N= 144316): Avg Score = 5.78
+Score on contest # 8 (N= 121075): Avg Score = 5.99
+Score on contest # 9 (N= 102590): Avg Score = 6.21
+Score on contest #10 (N=  87538): Avg Score = 6.37
+Score on contest #11 (N=  75293): Avg Score = 6.54
+Score on contest #12 (N=  64837): Avg Score = 6.70
+Score on contest #13 (N=  56146): Avg Score = 6.81
+Score on contest #14 (N=  48753): Avg Score = 6.89
+Score on contest #15 (N=  42470): Avg Score = 7.03
+Score on contest #16 (N=  37129): Avg Score = 7.17
+Score on contest #17 (N=  32604): Avg Score = 7.22
+Score on contest #18 (N=  28740): Avg Score = 7.33
+Score on contest #19 (N=  25309): Avg Score = 7.40
+Score on contest #20 (N=  22382): Avg Score = 7.50

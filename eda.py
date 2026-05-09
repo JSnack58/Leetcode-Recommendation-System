@@ -5,7 +5,7 @@ import statistics
 def run_eda(file_path):
     total_records = 0
     unique_contests = set()
-    unique_users = set()
+    user_counter = Counter()
     
     country_counter = Counter()
     region_counter = Counter()
@@ -28,7 +28,7 @@ def run_eda(file_path):
                         
                     user_slug = data.get("user_slug")
                     if user_slug is not None:
-                        unique_users.add(user_slug)
+                        user_counter[user_slug] += 1
                         
                     country = data.get("country_name") or "Unknown/None"
                     country_counter[country] += 1
@@ -59,9 +59,23 @@ def run_eda(file_path):
     print("\n" + "="*40)
     print("EDA RESULTS")
     print("="*40)
+    
+    unique_users_count = len(user_counter)
+    users_more_than_once = sum(1 for count in user_counter.values() if count > 1)
+    total_possible_interactions = unique_users_count * len(unique_contests)
+    sparsity = 1.0 - (total_records / total_possible_interactions) if total_possible_interactions > 0 else 0.0
+
     print(f"Total Records: {total_records:,}")
     print(f"Unique Contests: {len(unique_contests):,}")
-    print(f"Unique Users (by slug): {len(unique_users):,}")
+    print(f"Unique Users (by slug): {unique_users_count:,}")
+    print(f"Users appearing > 1 time: {users_more_than_once:,} ({(users_more_than_once/unique_users_count)*100:.2f}%)")
+    print(f"Data Sparsity (1 - records / (users * contests)): {sparsity*100:.2f}%")
+    
+    # Let's also print the distribution of user participation
+    participation_counts = Counter(user_counter.values())
+    print("\nUser Participation Distribution (Top 10 frequencies):")
+    for times, num_users in participation_counts.most_common(10):
+        print(f"  Participated in {times} contests: {num_users:,} users")
     
     if scores:
         print(f"\nScore Statistics:")

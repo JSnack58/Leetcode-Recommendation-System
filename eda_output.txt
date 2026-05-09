@@ -1,0 +1,62 @@
+Starting EDA on combined_contest_data.jsonl...
+Error parsing line 460906
+Processed 500000 records...
+Processed 1000000 records...
+Processed 1500000 records...
+Processed 2000000 records...
+Processed 2500000 records...
+Error parsing line 2693123
+Processed 3000000 records...
+
+========================================
+EDA RESULTS
+========================================
+Total Records: 3,457,133
+Unique Contests: 341
+Unique Users (by slug): 856,274
+Users appearing > 1 time: 484,316 (56.56%)
+Data Sparsity (1 - records / (users * contests)): 98.82%
+
+User Participation Distribution (Top 10 frequencies):
+  Participated in 1 contests: 371,958 users
+  Participated in 2 contests: 138,152 users
+  Participated in 3 contests: 79,346 users
+  Participated in 4 contests: 53,693 users
+  Participated in 5 contests: 39,141 users
+  Participated in 6 contests: 29,668 users
+  Participated in 7 contests: 23,241 users
+  Participated in 8 contests: 18,485 users
+  Participated in 9 contests: 15,052 users
+  Participated in 10 contests: 12,245 users
+
+Score Statistics:
+  Average Score: 4.86
+  Max Score: 23
+
+Top 10 Countries:
+  Unknown/None: 1,707,401
+  India: 1,307,137
+  中国: 190,118
+  United States: 75,536
+  Taiwan: 22,781
+  Bangladesh: 19,355
+  Canada: 11,101
+  China: 10,687
+  Vietnam: 9,117
+  Russia: 6,372
+
+Data Regions:
+  US: 3,052,263
+  CN: 404,870
+
+Top 10 Languages Used in Submissions:
+  cpp: 2,501,084
+  java: 926,480
+  python3: 751,726
+  python: 70,108
+  javascript: 46,528
+  golang: 32,948
+  c: 25,125
+  csharp: 23,073
+  kotlin: 9,540
+  rust: 6,147
