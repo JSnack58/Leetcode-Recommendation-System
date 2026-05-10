@@ -95,4 +95,4 @@ def run_eda(file_path):
         print(f"  {lang}: {count:,}")
 
 if __name__ == "__main__":
-    run_eda("combined_contest_data.jsonl")
+    run_eda("/home/anthony/repos/Leetcode-Recommendation-System/data/raw/contests/combined_contest_data.jsonl")
