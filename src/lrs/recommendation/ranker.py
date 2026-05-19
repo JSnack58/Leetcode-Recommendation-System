@@ -152,8 +152,6 @@ class RecommendationRanker:
         # 3. Skip problems that would exceed tag limit
         # 4. Return ranked list
         
-        logger.info("TODO: Implement diversity-aware ranking")
-        
         ranked = []
         tag_counts = {}
         sorted_indices = np.argsort(scores)[::-1]

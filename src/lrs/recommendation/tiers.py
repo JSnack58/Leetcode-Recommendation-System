@@ -1,24 +1,18 @@
-"""Tier assignment logic for recommendation system.
+"""Tier assignment logic for recommendation system."""
 
-This module implements the three-tier recommendation strategy:
-- Edge of Competence: Problems that challenge just above current level
-- Blind Spots: Topics where user underperforms compared to peers
-- Confidence Builders: High-success-rate problems for reinforcement
-"""
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from loguru import logger
 
 from lrs.config import (
-    EDGE_P_LOW,
-    EDGE_P_HIGH,
     BLIND_SPOT_THRESHOLD,
     CONFIDENCE_P_MIN,
-    TIER_SIZE
+    EDGE_P_HIGH,
+    EDGE_P_LOW,
+    TIER_SIZE,
 )
 from lrs.utils.logging import get_logger
 
@@ -28,278 +22,153 @@ logger = get_logger(__name__)
 @dataclass
 class TierRecommendation:
     """Container for tiered recommendations."""
-    
+
     edge_of_competence: list[str]
     blind_spots: list[str]
     confidence_builders: list[str]
-    
+
     def to_dict(self) -> dict[str, list[str]]:
-        """Convert to dictionary format."""
         return {
             "edge_of_competence": self.edge_of_competence,
             "blind_spots": self.blind_spots,
-            "confidence_builders": self.confidence_builders
+            "confidence_builders": self.confidence_builders,
         }
-    
-    def __str__(self) -> str:
-        """String representation."""
-        return (
-            f"TierRecommendation(\n"
-            f"  edge_of_competence: {self.edge_of_competence}\n"
-            f"  blind_spots: {self.blind_spots}\n"
-            f"  confidence_builders: {self.confidence_builders}\n"
-            f")"
-        )
 
 
 class TierAssigner:
-    """Assigns problems to recommendation tiers based on predicted scores.
-    
-    Attributes:
-        edge_p_low: Lower bound for Edge of Competence probability
-        edge_p_high: Upper bound for Edge of Competence probability
-        blind_spot_threshold: Minimum divergence for Blind Spots
-        confidence_p_min: Minimum probability for Confidence Builders
-        tier_size: Number of problems per tier
-    """
-    
+    """Assigns problems to recommendation tiers based on predicted scores."""
+
     def __init__(
         self,
         edge_p_low: float = EDGE_P_LOW,
         edge_p_high: float = EDGE_P_HIGH,
         blind_spot_threshold: float = BLIND_SPOT_THRESHOLD,
         confidence_p_min: float = CONFIDENCE_P_MIN,
-        tier_size: int = TIER_SIZE
+        tier_size: int = TIER_SIZE,
     ):
-        """Initialize the tier assigner.
-        
-        Args:
-            edge_p_low: Lower bound for Edge of Competence
-            edge_p_high: Upper bound for Edge of Competence
-            blind_spot_threshold: Minimum divergence for Blind Spots
-            confidence_p_min: Minimum probability for Confidence Builders
-            tier_size: Number of problems per tier
-        """
         self.edge_p_low = edge_p_low
         self.edge_p_high = edge_p_high
         self.blind_spot_threshold = blind_spot_threshold
         self.confidence_p_min = confidence_p_min
         self.tier_size = tier_size
-        
-        logger.info(
-            f"Initialized TierAssigner with thresholds:\n"
-            f"  Edge of Competence: [{edge_p_low}, {edge_p_high}]\n"
-            f"  Blind Spots: > {blind_spot_threshold} divergence\n"
-            f"  Confidence Builders: > {confidence_p_min}"
-        )
-    
+
     def assign_tiers(
         self,
         user_id: str,
         problem_ids: list[str],
         scores: np.ndarray,
-        user_features: Optional[pd.DataFrame] = None,
-        peer_features: Optional[pd.DataFrame] = None
+        user_features: pd.Series | None = None,
+        peer_tag_scores: dict[str, float] | None = None,
+        problem_tags: dict[str, list[str]] | None = None,
+        user_median_finish: float | None = None,
+        problem_median_finish: dict[str, float] | None = None,
     ) -> TierRecommendation:
-        """Assign problems to tiers based on predicted scores.
-        
-        Args:
-            user_id: User ID
-            problem_ids: List of problem IDs
-            scores: Predicted scores for each problem
-            user_features: Optional user features for Blind Spot detection
-            peer_features: Optional peer features for comparison
-        
-        Returns:
-            TierRecommendation with problems assigned to each tier
-        """
-        logger.debug(f"Assigning tiers for user {user_id} with {len(problem_ids)} candidates")
-        
-        # Sort by score
-        sorted_indices = np.argsort(scores)[::-1]
-        sorted_problem_ids = [problem_ids[i] for i in sorted_indices]
-        sorted_scores = scores[sorted_indices]
-        
-        # Initialize tier lists
-        edge_of_competence = []
-        blind_spots = []
-        confidence_builders = []
-        
-        # Edge of Competence: [P_low, P_high]
-        edge_mask = (sorted_scores >= self.edge_p_low) & (sorted_scores <= self.edge_p_high)
-        edge_candidates = [
-            pid for pid, score in zip(sorted_problem_ids, sorted_scores)
-            if edge_mask[sorted_problem_ids.index(pid)]
-        ]
-        edge_of_competence = edge_candidates[:self.tier_size]
-        
-        # Confidence Builders: > P_min
-        confidence_mask = sorted_scores >= self.confidence_p_min
-        confidence_candidates = [
-            pid for pid, score in zip(sorted_problem_ids, sorted_scores)
-            if confidence_mask[sorted_problem_ids.index(pid)]
-        ]
-        confidence_builders = confidence_candidates[:self.tier_size]
-        
-        # Blind Spots: Topics where user underperforms
-        if user_features is not None and peer_features is not None:
-            blind_spot_problems = self._detect_blind_spots(
-                user_id, problem_ids, scores, user_features, peer_features
-            )
-            blind_spots = blind_spot_problems[:self.tier_size]
-        
-        logger.info(
-            f"Assigned tiers for user {user_id}:\n"
-            f"  Edge of Competence: {len(edge_of_competence)} problems\n"
-            f"  Blind Spots: {len(blind_spots)} problems\n"
-            f"  Confidence Builders: {len(confidence_builders)} problems"
-        )
-        
+        """Assign problems to tiers based on predicted scores."""
+        order = np.argsort(scores)[::-1]
+        sorted_ids = [problem_ids[i] for i in order]
+        sorted_scores = scores[order]
+
+        edge_of_competence: list[str] = []
+        confidence_builders: list[str] = []
+        blind_spots: list[str] = []
+
+        for pid, score in zip(sorted_ids, sorted_scores):
+            if self.edge_p_low <= score <= self.edge_p_high and len(edge_of_competence) < self.tier_size:
+                edge_of_competence.append(pid)
+
+        if not edge_of_competence:
+            target = (self.edge_p_low + self.edge_p_high) / 2.0
+            dists = np.abs(sorted_scores - target)
+            edge_order = np.argsort(dists)
+            for idx in edge_order:
+                if len(edge_of_competence) >= self.tier_size:
+                    break
+                pid = sorted_ids[idx]
+                if pid not in edge_of_competence:
+                    edge_of_competence.append(pid)
+
+        for pid, score in zip(sorted_ids, sorted_scores):
+            if score >= self.confidence_p_min and len(confidence_builders) < self.tier_size:
+                if user_median_finish is not None and problem_median_finish:
+                    p_med = problem_median_finish.get(pid)
+                    if p_med is not None and p_med > user_median_finish * 1.2:
+                        continue
+                confidence_builders.append(pid)
+
+        if user_features is not None and peer_tag_scores and problem_tags:
+            blind_spot_tags = self._blind_spot_tags(user_features, peer_tag_scores)
+            blind_spots = self._problems_for_tags(
+                sorted_ids, sorted_scores, blind_spot_tags, problem_tags
+            )[: self.tier_size]
+
         return TierRecommendation(
             edge_of_competence=edge_of_competence,
             blind_spots=blind_spots,
-            confidence_builders=confidence_builders
+            confidence_builders=confidence_builders,
         )
-    
-    def _detect_blind_spots(
+
+    def _blind_spot_tags(
         self,
-        user_id: str,
-        problem_ids: list[str],
-        scores: np.ndarray,
-        user_features: pd.DataFrame,
-        peer_features: pd.DataFrame
-    ) -> list[str]:
-        """Detect problems in user's blind spot topics.
-        
-        Blind spots are topics where the user's performance is significantly
-        below their peer group average.
-        
-        Args:
-            user_id: User ID
-            problem_ids: List of problem IDs
-            scores: Predicted scores
-            user_features: User feature DataFrame
-            peer_features: Peer group feature DataFrame
-        
-        Returns:
-            List of problem IDs in blind spots
-        """
-        # Get user's tag performance
-        user_tag_scores = user_features.get("tag_scores", {})
-        
-        # Get peer group average tag performance
-        peer_avg_tag_scores = peer_features.groupby("tag")["score"].mean().to_dict()
-        
-        # Find tags where user underperforms
-        blind_spot_tags = []
+        user_features: pd.Series,
+        peer_tag_scores: dict[str, float],
+    ) -> set[str]:
+        user_tag_scores = user_features.get("tag_scores") or {}
+        if isinstance(user_tag_scores, str):
+            import ast
+
+            try:
+                user_tag_scores = ast.literal_eval(user_tag_scores)
+            except (ValueError, SyntaxError):
+                user_tag_scores = {}
+
+        blind: set[str] = set()
         for tag, user_score in user_tag_scores.items():
-            peer_score = peer_avg_tag_scores.get(tag, 0.5)
+            peer_score = peer_tag_scores.get(tag, 0.5)
             if user_score < peer_score - self.blind_spot_threshold:
-                blind_spot_tags.append(tag)
-        
-        logger.debug(f"Detected blind spot tags: {blind_spot_tags}")
-        
-        # Find problems with these tags
-        blind_spot_problems = []
-        for pid, score in zip(problem_ids, scores):
-            # Check if problem has any blind spot tags
-            # This would require access to problem features
-            # For now, use score-based heuristic
-            if score < 0.5:  # Low predicted score
-                blind_spot_problems.append(pid)
-        
-        return blind_spot_problems
-    
+                blind.add(tag)
+        return blind
+
+    def _problems_for_tags(
+        self,
+        sorted_ids: list[str],
+        sorted_scores: np.ndarray,
+        blind_tags: set[str],
+        problem_tags: dict[str, list[str]],
+    ) -> list[str]:
+        result: list[str] = []
+        for pid, score in zip(sorted_ids, sorted_scores):
+            tags = problem_tags.get(pid, [])
+            if blind_tags & set(tags):
+                result.append(pid)
+        return result
+
     def filter_solved_problems(
         self,
         problem_ids: list[str],
         solved_problems: set[str],
-        scores: np.ndarray
+        scores: np.ndarray,
     ) -> tuple[list[str], np.ndarray]:
-        """Filter out already-solved problems.
-        
-        Args:
-            problem_ids: List of problem IDs
-            solved_problems: Set of already-solved problem IDs
-            scores: Predicted scores
-        
-        Returns:
-            Tuple of (filtered problem IDs, filtered scores)
-        """
-        mask = [pid not in solved_problems for pid in problem_ids]
-        filtered_ids = [pid for pid, m in zip(problem_ids, mask) if m]
-        filtered_scores = scores[mask]
-        
-        logger.debug(f"Filtered {len(problem_ids) - len(filtered_ids)} solved problems")
-        
-        return filtered_ids, filtered_scores
-    
+        mask = np.array([pid not in solved_problems for pid in problem_ids])
+        return [p for p, m in zip(problem_ids, mask) if m], scores[mask]
+
     def enforce_tag_diversity(
         self,
         problem_ids: list[str],
         scores: np.ndarray,
         problem_tags: dict[str, list[str]],
-        max_per_tag: int = 2
+        max_per_tag: int = 2,
     ) -> tuple[list[str], np.ndarray]:
-        """Enforce tag diversity in recommendations.
-        
-        Args:
-            problem_ids: List of problem IDs
-            scores: Predicted scores
-            problem_tags: Dictionary of problem_id -> tags
-            max_per_tag: Maximum problems per tag
-        
-        Returns:
-            Tuple of (diversified problem IDs, diversified scores)
-        """
-        tag_counts = {}
-        selected_ids = []
-        selected_scores = []
-        
+        tag_counts: dict[str, int] = {}
+        selected_ids: list[str] = []
+        selected_scores: list[float] = []
+
         for pid, score in zip(problem_ids, scores):
             tags = problem_tags.get(pid, [])
-            
-            # Check if any tag is at max
-            tag_overflow = False
+            if any(tag_counts.get(t, 0) >= max_per_tag for t in tags):
+                continue
+            selected_ids.append(pid)
+            selected_scores.append(float(score))
             for tag in tags:
-                if tag in tag_counts and tag_counts[tag] >= max_per_tag:
-                    tag_overflow = True
-                    break
-            
-            if not tag_overflow:
-                selected_ids.append(pid)
-                selected_scores.append(score)
-                for tag in tags:
-                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
-        
-        logger.debug(f"Enforced tag diversity: {len(problem_ids)} -> {len(selected_ids)} problems")
-        
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
         return selected_ids, np.array(selected_scores)
-
-
-def create_tier_assigner(
-    edge_p_low: float = EDGE_P_LOW,
-    edge_p_high: float = EDGE_P_HIGH,
-    blind_spot_threshold: float = BLIND_SPOT_THRESHOLD,
-    confidence_p_min: float = CONFIDENCE_P_MIN,
-    tier_size: int = TIER_SIZE
-) -> TierAssigner:
-    """Factory function to create a TierAssigner.
-    
-    Args:
-        edge_p_low: Lower bound for Edge of Competence
-        edge_p_high: Upper bound for Edge of Competence
-        blind_spot_threshold: Minimum divergence for Blind Spots
-        confidence_p_min: Minimum probability for Confidence Builders
-        tier_size: Number of problems per tier
-    
-    Returns:
-        Configured TierAssigner
-    """
-    return TierAssigner(
-        edge_p_low=edge_p_low,
-        edge_p_high=edge_p_high,
-        blind_spot_threshold=blind_spot_threshold,
-        confidence_p_min=confidence_p_min,
-        tier_size=tier_size
-    )

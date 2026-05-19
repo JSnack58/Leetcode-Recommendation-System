@@ -16,6 +16,7 @@ dependencies = [
     "pyarrow>=14.0",        # Parquet I/O
     "requests>=2.31",       # LeetCode API scraping
     "curl-cffi>=0.7",       # Chrome TLS impersonation to bypass Cloudflare
+    "networkx>=3.2",        # GML graph loading for problem catalog
 ]
 
 [dependency-groups]

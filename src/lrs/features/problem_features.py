@@ -138,8 +138,10 @@ def compute_problem_tag_vectors(
     # Collect all tags
     all_tags = set()
     for tags in problems_df["tags"]:
-        if isinstance(tags, list):
+        if isinstance(tags, (list, tuple)):
             all_tags.update(tags)
+        elif hasattr(tags, "__iter__") and not isinstance(tags, str):
+            all_tags.update(list(tags))
     
     tag_list = sorted(all_tags)
     tag_to_idx = {tag: idx for idx, tag in enumerate(tag_list)}
@@ -149,11 +151,15 @@ def compute_problem_tag_vectors(
     for _, row in problems_df.iterrows():
         problem_id = row["problem_id"]
         tags = row.get("tags", [])
-        if isinstance(tags, str):
+        if hasattr(tags, "__iter__") and not isinstance(tags, str):
+            tags = list(tags)
+        elif isinstance(tags, str):
             try:
                 tags = eval(tags)
-            except:
+            except Exception:
                 tags = []
+        else:
+            tags = []
         
         vector = np.zeros(len(tag_list), dtype=np.float32)
         for tag in tags:

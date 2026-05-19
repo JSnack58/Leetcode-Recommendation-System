@@ -12,4 +12,9 @@ def configure_logging() -> None:
     logger.add(sys.stderr, level=config.LOG_LEVEL)
 
 
-__all__ = ["logger", "configure_logging"]
+def get_logger(name: str | None = None):
+    """Return loguru logger (name ignored, kept for API compatibility)."""
+    return logger
+
+
+__all__ = ["logger", "configure_logging", "get_logger"]

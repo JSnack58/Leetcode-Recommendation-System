@@ -35,11 +35,19 @@ uv sync --group advanced
 cp .env.example .env
 # Edit .env with your paths
 
-# Run baseline training
-uv run python scripts/train_baseline.py --model svd
+# Build processed data + features (auto-detects combined_contest_data.jsonl at repo root)
+python scripts/build_dataset.py
+# Or explicitly: python scripts/build_dataset.py --input combined_contest_data.jsonl
+# Dev sample: python scripts/build_dataset.py --sample 5000
+
+# Train ALS + content + ensemble
+python scripts/train_baseline.py --model all
+
+# Generate tiered recommendations
+python scripts/generate_recommendations.py --user-slug YOUR_SLUG --output recommendations.json
 
 # Run evaluation
-uv run python scripts/evaluate.py
+python scripts/evaluate.py
 ```
 
 ## Project Structure

@@ -1,0 +1,42 @@
+{
+  "user_id": "ced6544bcb5e08a6",
+  "edge_of_competence": [
+    {
+      "slug": "missing-ranges",
+      "p_solve": 0.6356,
+      "tags": [
+        "Array"
+      ]
+    },
+    {
+      "slug": "maximum-gap",
+      "p_solve": 0.6356,
+      "tags": [
+        "Array",
+        "Sorting",
+        "Bucket Sort",
+        "Radix Sort"
+      ]
+    },
+    {
+      "slug": "compare-version-numbers",
+      "p_solve": 0.6356,
+      "tags": [
+        "String",
+        "Two Pointers"
+      ]
+    },
+    {
+      "slug": "fraction-to-recurring-decimal",
+      "p_solve": 0.6356,
+      "tags": [
+        "Hash Table",
+        "Math",
+        "String"
+      ]
+    }
+  ],
+  "blind_spots": [],
+  "confidence_builders": [],
+  "user_slug": "Prasanna648"
+}

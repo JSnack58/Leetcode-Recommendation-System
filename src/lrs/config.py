@@ -53,6 +53,13 @@ CONFIDENCE_P_MIN: float = float(os.getenv("CONFIDENCE_P_MIN", "0.75"))
 # Number of problems per tier
 TIER_SIZE: int = int(os.getenv("TIER_SIZE", "5"))
 
+# Ensemble weights
+ENSEMBLE_W_ALS: float = float(os.getenv("ENSEMBLE_W_ALS", "0.7"))
+ENSEMBLE_W_CONTENT: float = float(os.getenv("ENSEMBLE_W_CONTENT", "0.3"))
+GRAPH_BOOST_ALPHA: float = float(os.getenv("GRAPH_BOOST_ALPHA", "0.05"))
+
+SIMILARITY_GRAPH_GML = DATA_DIR / "leetcode_problems_graph.gml"
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------

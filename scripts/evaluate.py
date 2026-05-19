@@ -1,27 +1,48 @@
-"""Run the offline evaluation suite against a trained model.
+#!/usr/bin/env python3
+"""Run offline evaluation."""
 
-Usage:
-    uv run python scripts/evaluate.py --model svd
-    uv run python scripts/evaluate.py --model ncf --n-test-contests 5
-"""
+from __future__ import annotations
 
 import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+import pandas as pd
+
+from lrs.config import PROCESSED_DIR
+from lrs.evaluation.backtest import run_backtest
+from lrs.models.baseline.als import ALSRecommender
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Offline evaluation for LRS models")
-    parser.add_argument("--model", required=True, help="Model name to evaluate")
-    parser.add_argument(
-        "--n-test-contests",
-        type=int,
-        default=5,
-        help="Number of most-recent contests to hold out for testing",
-    )
+    parser = argparse.ArgumentParser(description="Evaluate LRS models")
+    parser.add_argument("--k", type=int, default=10)
+    parser.add_argument("--n-test-contests", type=int, default=10)
+    parser.add_argument("--output", default=None, help="JSON metrics output path")
     args = parser.parse_args()
 
-    # TODO: Load model artifact, run backtest, print metrics table
-    print(f"Evaluating model: {args.model} | test contests: {args.n_test_contests}")
-    raise NotImplementedError("Implement after src/lrs/evaluation/ is complete")
+    interactions = pd.read_parquet(PROCESSED_DIR / "interactions.parquet")
+    metrics = run_backtest(
+        interactions,
+        model=ALSRecommender(latent_dim=32, iterations=10),
+        n_test_contests=args.n_test_contests,
+        k=args.k,
+    )
+
+    print("Evaluation metrics:")
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":
