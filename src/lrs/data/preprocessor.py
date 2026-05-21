@@ -5,15 +5,12 @@ Immutability rule: never read from processed/ as input to this module.
 """
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Generator
 
 import pandas as pd
 from loguru import logger
-
-from lrs.utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 def hash_user_id(user_slug: str, salt: str = "lrs_v1") -> str:
@@ -39,252 +36,169 @@ def load_raw_contest_data(raw_dir: Path) -> pd.DataFrame:
         DataFrame with all contest records
     """
     jsonl_files = list(raw_dir.glob("*.jsonl"))
-    if not jsonl_files:
-        raise ValueError(f"No JSONL files found in {raw_dir}")
-    
-    logger.info(f"Loading {len(jsonl_files)} contest files from {raw_dir}")
+    logger.info(f"Found {len(jsonl_files)} contest files in {raw_dir}")
     
     records = []
     for file_path in jsonl_files:
-        logger.debug(f"Processing {file_path.name}")
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, start=1):
-                try:
-                    record = pd.read_json(line, typ="series")
-                    records.append(record)
-                except Exception as e:
-                    logger.warning(f"Failed to parse line {line_num} in {file_path.name}: {e}")
-    
-    if not records:
-        raise ValueError("No valid records found in contest files")
+        logger.debug(f"Loading {file_path.name}")
+        with open(file_path, "r") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        record = json.loads(line)
+                        records.append(record)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Skipping invalid JSON line in {file_path.name}: {e}")
     
     df = pd.DataFrame(records)
-    logger.info(f"Loaded {len(df):,} total records from {len(jsonl_files)} files")
-    
+    logger.info(f"Loaded {len(df):,} total contest records")
     return df
 
 
-def load_raw_problem_data(raw_dir: Path) -> pd.DataFrame:
-    """Load problem metadata from raw data.
+def preprocess_contest_data(raw_dir: Path, processed_dir: Path) -> None:
+    """Main preprocessing pipeline.
     
     Args:
-        raw_dir: Path to data/raw/ directory
-    
-    Returns:
-        DataFrame with problem metadata
+        raw_dir: Path to data/raw/contests/
+        processed_dir: Path to data/processed/
     """
-    problems_file = raw_dir / "problems.jsonl"
-    if not problems_file.exists():
-        logger.warning(f"Problem metadata file not found at {problems_file}")
-        return pd.DataFrame()
-    
-    records = []
-    with open(problems_file, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                record = pd.read_json(line, typ="series")
-                records.append(record)
-            except Exception as e:
-                logger.warning(f"Failed to parse problem record: {e}")
-    
-    if records:
-        df = pd.DataFrame(records)
-        logger.info(f"Loaded {len(df):,} problem records")
-    else:
-        df = pd.DataFrame()
-    
-    return df
-
-
-def normalize_finish_time(finish_time_ms: float | None) -> float | None:
-    """Normalize finish time from milliseconds to minutes.
-    
-    Args:
-        finish_time_ms: Finish time in milliseconds (or None if unsolved)
-    
-    Returns:
-        Finish time in minutes (or None)
-    """
-    if finish_time_ms is None:
-        return None
-    return round(finish_time_ms / 60000, 2)
-
-
-def cap_outliers(series: pd.Series, percentile: float = 90) -> pd.Series:
-    """Cap values at specified percentile to handle outliers.
-    
-    Args:
-        series: Input series
-        percentile: Percentile to cap at
-    
-    Returns:
-        Series with outliers capped
-    """
-    threshold = series.quantile(percentile / 100)
-    return series.clip(upper=threshold)
-
-
-def compute_difficulty_proxy(
-    finish_time_min: float | None,
-    penalty_count: int,
-    global_median_time: float,
-    global_median_penalty: int
-) -> float:
-    """Compute difficulty proxy from solver behavior.
-    
-    Higher values indicate harder problems for the user.
-    
-    Args:
-        finish_time_min: User's finish time in minutes
-        penalty_count: Number of wrong submissions
-        global_median_time: Median finish time across all users
-        global_median_penalty: Median penalty count across all users
-    
-    Returns:
-        Difficulty proxy score (higher = harder)
-    """
-    if finish_time_min is None:
-        # Unsolved problems are considered very hard
-        return 2.0
-    
-    # Normalize finish time relative to global median
-    time_ratio = finish_time_min / max(global_median_time, 1)
-    
-    # Normalize penalty count relative to global median
-    penalty_ratio = penalty_count / max(global_median_penalty, 1)
-    
-    # Combine into difficulty proxy
-    difficulty = (time_ratio + penalty_ratio) / 2
-    
-    # Cap at reasonable range
-    return min(max(difficulty, 0.1), 3.0)
-
-
-def preprocess_contest_data(
-    raw_dir: Path,
-    output_dir: Path,
-    user_salt: str = "lrs_v1"
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Main preprocessing pipeline for contest data.
-    
-    Args:
-        raw_dir: Path to data/raw/contests/ directory
-        output_dir: Path to data/processed/ directory
-        user_salt: Salt for user ID hashing
-    
-    Returns:
-        Tuple of (interactions_df, problems_df)
-    """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Starting preprocessing pipeline")
     
     # Load raw data
-    df = load_raw_contest_data(raw_dir)
+    raw_df = load_raw_contest_data(raw_dir)
     
-    # Load problem metadata if available
-    problems_df = pd.DataFrame()
-    problems_file = raw_dir.parent / "problems.jsonl"
-    if problems_file.exists():
-        problems_df = load_raw_problem_data(raw_dir.parent)
+    # Create processed directory
+    processed_dir.mkdir(parents=True, exist_ok=True)
     
-    logger.info("Starting preprocessing...")
+    # Generate interactions
+    interactions = generate_interactions(raw_df)
+    interactions.to_parquet(processed_dir / "interactions.parquet")
+    logger.info(f"Saved {len(interactions):,} interaction records")
     
-    # Drop duplicates (same user + problem in same contest)
-    duplicate_cols = ["user_slug", "problem_id", "contest_id"]
-    duplicates = df.duplicated(subset=duplicate_cols, keep=False)
-    if duplicates.any():
-        logger.warning(f"Dropping {duplicates.sum()} duplicate records")
-        df = df[~duplicates]
+    # Generate user features
+    user_features = generate_user_features(raw_df)
+    user_features.to_parquet(processed_dir / "user_features.parquet")
+    logger.info(f"Saved {len(user_features):,} user feature records")
     
+    # Generate problem features
+    problem_features = generate_problem_features(raw_df)
+    problem_features.to_parquet(processed_dir / "problem_features.parquet")
+    logger.info(f"Saved {len(problem_features):,} problem feature records")
+    
+    logger.info("Preprocessing pipeline completed")
+
+
+def generate_interactions(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Generate interaction records from raw contest data.
+    
+    Args:
+        raw_df: Raw contest data DataFrame
+    
+    Returns:
+        DataFrame with interaction records
+    """
     # Hash user IDs for privacy
-    df["user_id"] = df["user_slug"].apply(lambda x: hash_user_id(x, user_salt))
-    df = df.drop(columns=["user_slug"])
+    raw_df = raw_df.copy()
+    raw_df["user_id"] = raw_df["user_slug"].apply(hash_user_id)
     
-    # Normalize finish time to minutes
-    df["finish_time_min"] = df["finish_time_ms"].apply(normalize_finish_time)
-    df = df.drop(columns=["finish_time_ms"])
+    # Flatten submissions into individual interaction records
+    interactions = []
     
-    # Cap finish time outliers at 90th percentile
-    finish_times = df["finish_time_min"].dropna()
-    if len(finish_times) > 0:
-        threshold = finish_times.quantile(0.90)
-        df.loc[df["finish_time_min"] > threshold, "finish_time_min"] = threshold
-        logger.info(f"Capped finish time outliers at {threshold:.2f} minutes")
+    for _, row in raw_df.iterrows():
+        user_id = row["user_id"]
+        contest_id = row["contest_id"]
+        submissions = row.get("submissions", {})
+        
+        for problem_id, submission_info in submissions.items():
+            # Determine if solved (no failures)
+            solved = submission_info.get("fail_count", 0) == 0
+            
+            # Create interaction record
+            interactions.append({
+                "user_id": user_id,
+                "problem_id": problem_id,
+                "contest_id": contest_id,
+                "solved": solved,
+            })
     
-    # Compute difficulty proxy
-    global_median_time = df["finish_time_min"].dropna().median()
-    global_median_penalty = df["penalty_count"].median()
-    df["difficulty_proxy"] = df.apply(
-        lambda row: compute_difficulty_proxy(
-            row["finish_time_min"],
-            row["penalty_count"],
-            global_median_time,
-            global_median_penalty
-        ),
-        axis=1
-    )
+    interactions_df = pd.DataFrame(interactions)
     
-    # Normalize score to [0, 1] range (assuming max score is 23)
-    df["normalized_score"] = df["score"] / 23.0
-    df["normalized_score"] = df["normalized_score"].clip(upper=1.0)
+    # Remove duplicates (user may have solved same problem multiple times)
+    interactions_df = interactions_df.drop_duplicates(subset=["user_id", "problem_id"])
     
-    # Compute solved status
-    df["solved"] = df["score"] > 0
+    # Keep only solved problems for ALS training
+    interactions_df = interactions_df[interactions_df["solved"] == True].copy()
     
-    # Drop rows with missing required fields
-    required_cols = ["user_id", "contest_id", "problem_id", "solved"]
-    df = df.dropna(subset=required_cols)
-    
-    # Join problem metadata if available
-    if not problems_df.empty:
-        df = df.merge(
-            problems_df[["problem_id", "difficulty_label", "tags", "acceptance_rate"]],
-            on="problem_id",
-            how="left"
-        )
-    
-    # Select final columns
-    interactions_cols = [
-        "user_id", "contest_id", "problem_id", "solved",
-        "finish_time_min", "penalty_count", "language",
-        "user_rating", "difficulty_proxy", "normalized_score",
-        "difficulty_label", "tags", "acceptance_rate"
-    ]
-    df = df[[col for col in interactions_cols if col in df.columns]]
-    
-    # Sort by user and contest for easier processing
-    df = df.sort_values(["user_id", "contest_id", "problem_id"])
-    
-    logger.info(f"Preprocessed {len(df):,} interaction records")
-    
-    # Save to parquet
-    interactions_path = output_dir / "interactions.parquet"
-    df.to_parquet(interactions_path, index=False)
-    logger.info(f"Saved interactions to {interactions_path}")
-    
-    # Save cleaned problems separately
-    if not problems_df.empty:
-        problems_cols = ["problem_id", "difficulty_label", "tags", "acceptance_rate"]
-        problems_clean = problems_df[[col for col in problems_cols if col in problems_df.columns]]
-        problems_path = output_dir / "problems_clean.parquet"
-        problems_clean.to_parquet(problems_path, index=False)
-        logger.info(f"Saved problems to {problems_path}")
-    
-    return df, problems_clean if not problems_df.empty else pd.DataFrame()
+    return interactions_df
 
 
-def main():
-    """Run preprocessing pipeline."""
-    import os
-    from dotenv import load_dotenv
+def generate_user_features(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Generate per-user aggregated features.
     
-    load_dotenv()
+    Args:
+        raw_df: Raw contest data DataFrame
     
-    raw_dir = Path(os.getenv("DATA_RAW_DIR", "data/raw/contests"))
-    output_dir = Path(os.getenv("DATA_PROCESSED_DIR", "data/processed"))
+    Returns:
+        DataFrame with user features
+    """
+    # Hash user IDs
+    raw_df = raw_df.copy()
+    raw_df["user_id"] = raw_df["user_slug"].apply(hash_user_id)
     
-    preprocess_contest_data(raw_dir, output_dir)
+    # Aggregate user statistics
+    user_stats = raw_df.groupby("user_id").agg(
+        total_contests=("contest_id", "count"),
+        total_problems_solved=("problem_id", "count"),
+        avg_score=("score", "mean"),
+        max_score=("score", "max"),
+        first_contest_date=("contest_id", "min"),
+        last_contest_date=("contest_id", "max"),
+    ).reset_index()
+    
+    # Add user ID index for matrix alignment
+    user_ids = user_stats["user_id"].unique()
+    user_stats["user_id_idx"] = user_stats["user_id"].map({uid: idx for idx, uid in enumerate(user_ids)})
+    
+    return user_stats
 
 
-if __name__ == "__main__":
-    main()
+def generate_problem_features(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Generate per-problem aggregated features.
+    
+    Args:
+        raw_df: Raw contest data DataFrame
+    
+    Returns:
+        DataFrame with problem features
+    """
+    # Flatten submissions to get problem-level statistics
+    problem_stats = []
+    
+    for _, row in raw_df.iterrows():
+        contest_id = row["contest_id"]
+        submissions = row.get("submissions", {})
+        
+        for problem_id, submission_info in submissions.items():
+            solved = submission_info.get("fail_count", 0) == 0
+            problem_stats.append({
+                "problem_id": problem_id,
+                "contest_id": contest_id,
+                "solved": solved,
+            })
+    
+    problem_df = pd.DataFrame(problem_stats)
+    
+    # Aggregate problem statistics
+    problem_agg = problem_df.groupby("problem_id").agg(
+        total_attempts=("contest_id", "count"),
+        total_solved=("solved", "sum"),
+    ).reset_index()
+    
+    # Calculate solve rate
+    problem_agg["solve_rate"] = problem_agg["total_solved"] / problem_agg["total_attempts"]
+    
+    # Add problem ID index for matrix alignment
+    problem_ids = problem_agg["problem_id"].unique()
+    problem_agg["problem_id_idx"] = problem_agg["problem_id"].map({pid: idx for idx, pid in enumerate(problem_ids)})
+    
+    return problem_agg

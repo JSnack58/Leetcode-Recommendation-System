@@ -8,19 +8,16 @@ Reference:
     Rendle, S., et al. "Factorization Machines."
 """
 
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
+import json
 import numpy as np
 import pandas as pd
 from scipy import sparse
 from loguru import logger
 
 from lrs.models.base import BaseRecommender
-from lrs.utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 class ALSRecommender(BaseRecommender):
@@ -45,7 +42,9 @@ class ALSRecommender(BaseRecommender):
         id_to_user: Reverse mapping from index to user_id
         id_to_item: Reverse mapping from index to item_id
         latent_dim: Number of latent factors
-        regularization: Regularization parameter
+        regularization: Regularization parameter (alpha)
+        iterations: Number of ALS iterations
+        use_bpr: Whether to use BPR loss (implicit feedback)
     """
     
     def __init__(
@@ -55,263 +54,520 @@ class ALSRecommender(BaseRecommender):
         iterations: int = 15,
         use_bpr: bool = False
     ):
-        """Initialize the ALS recommender.
+        """Initialize ALS recommender.
         
         Args:
             latent_dim: Number of latent factors
-            regularization: Regularization parameter (λ)
+            regularization: Regularization parameter (alpha)
             iterations: Number of ALS iterations
-            use_bpr: Whether to use Bayesian Personalized Ranking (implicit feedback)
+            use_bpr: Whether to use BPR loss (implicit feedback)
         """
         self.latent_dim = latent_dim
         self.regularization = regularization
         self.iterations = iterations
         self.use_bpr = use_bpr
         
-        self.model: Optional[object] = None
-        self.user_biases: dict[str, float] = {}
-        self.item_biases: dict[str, float] = {}
-        self.global_mean: float = 0.0
+        # Model attributes (set after training)
+        self.model = None
+        self.user_biases = {}
+        self.item_biases = {}
+        self.global_mean = 0.0
+        self.user_id_map = {}
+        self.item_id_map = {}
+        self.id_to_user = {}
+        self.id_to_item = {}
         
-        self.user_id_map: dict[str, int] = {}
-        self.item_id_map: dict[str, int] = {}
-        self.id_to_user: dict[int, str] = {}
-        self.id_to_item: dict[int, str] = {}
-        
-        self._fitted = False
+        logger.info(f"Initialized ALSRecommender: latent_dim={latent_dim}, "
+                   f"regularization={regularization}, iterations={iterations}, use_bpr={use_bpr}")
     
-    def fit(self, interactions: pd.DataFrame) -> "ALSRecommender":
-        """Train the ALS model on interaction data.
+    def fit(self, interactions: pd.DataFrame) -> None:
+        """Train the ALS model.
         
         Args:
-            interactions: DataFrame with columns [user_id, problem_id, score]
-        
-        Returns:
-            self for method chaining
+            interactions: DataFrame with columns ['user_id', 'item_id', 'rating']
         """
-        # TODO: Implement ALS training using implicit.als.AlternatingLeastSquares
-        # Steps:
-        # 1. Build user_id_map and item_id_map
-        # 2. Construct sparse interaction matrix
-        # 3. Compute bias terms (user biases, item biases, global mean)
-        # 4. Train ALS model with implicit library
-        # 5. Store latent factors and bias terms
-        # 6. Set _fitted = True
+        logger.info("Training ALS model...")
         
-        logger.info("TODO: Implement ALS training")
-        return self
+        # Create user and item ID mappings
+        users = interactions["user_id"].unique()
+        items = interactions["item_id"].unique()
+        
+        self.user_id_map = {user: idx for idx, user in enumerate(users)}
+        self.item_id_map = {item: idx for idx, item in enumerate(items)}
+        self.id_to_user = {idx: user for user, idx in self.user_id_map.items()}
+        self.id_to_item = {idx: item for item, idx in self.item_id_map.items()}
+        
+        # Build sparse matrix
+        n_users = len(users)
+        n_items = len(items)
+        
+        rows = interactions["user_id"].map(self.user_id_map).values
+        cols = interactions["item_id"].map(self.item_id_map).values
+        ratings = interactions["rating"].values
+        
+        # Create sparse matrix
+        R = sparse.csr_matrix(
+            (ratings, (rows, cols)),
+            shape=(n_users, n_items),
+            dtype=np.float32
+        )
+        
+        logger.info(f"Built interaction matrix: {n_users} users × {n_items} items, "
+                   f"{R.nnz} non-zero entries")
+        
+        # Compute biases
+        self.global_mean = ratings.mean()
+        user_ratings = R.toarray().mean(axis=1)
+        item_ratings = np.array(R.mean(axis=0)).flatten()
+        
+        self.user_biases = {
+            self.id_to_user[idx]: bias - self.global_mean
+            for idx, bias in enumerate(user_ratings)
+        }
+        self.item_biases = {
+            self.id_to_item[idx]: bias - self.global_mean
+            for idx, bias in enumerate(item_ratings)
+        }
+        
+        # Train ALS model
+        if self.use_bpr:
+            from implicit.bpr import BayesianPersonalizedRanking
+            self.model = BayesianPersonalizedRanking(
+                n_factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                num_threads=4,
+                random_state=42
+            )
+            self.model.fit(R)
+        else:
+            from implicit.als import AlternatingLeastSquares
+            self.model = AlternatingLeastSquares(
+                factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                use_native=True,
+                use_cg=True,
+                num_threads=4,
+                random_state=42
+            )
+            self.model.fit(R)
+        
+        logger.info("ALS training completed")
     
-    def predict(self, user_id: str, problem_ids: list[str]) -> np.ndarray:
-        """Predict scores for user-problem pairs.
-        
-        Args:
-            user_id: User ID to predict for
-            problem_ids: List of problem IDs to score
-        
-        Returns:
-            Array of predicted scores
-        """
-        # TODO: Implement prediction
-        # Steps:
-        # 1. Check if user exists in model (cold start handling)
-        # 2. Get user latent factors
-        # 3. Get item latent factors for requested problems
-        # 4. Compute dot product of latent factors
-        # 5. Add bias terms: global_mean + user_bias + item_bias + latent_interaction
-        # 6. Return predictions
-        
-        logger.info("TODO: Implement ALS prediction")
-        return np.array([])
-    
-    def recommend(
+    def fit_chunked(
         self,
-        user_id: str,
-        candidate_problem_ids: list[str],
-        k: int = 10
-    ) -> list[str]:
-        """Return top-k recommendations for a user.
+        interaction_chunks: pd.DataFrame | Generator[pd.DataFrame, None, None],
+        chunk_size: Optional[int] = None
+    ) -> None:
+        """Train the ALS model using chunked data loading for memory efficiency.
+        
+        This method supports both a single DataFrame and a generator of DataFrames.
+        When using a generator, data is processed in chunks to avoid loading
+        all interactions into memory at once.
         
         Args:
-            user_id: User ID to recommend for
-            candidate_problem_ids: Pool of candidate problem IDs
-            k: Number of recommendations to return
+            interaction_chunks: Either a DataFrame with ALS-formatted interactions,
+                               or a generator yielding DataFrames with columns
+                               ['user_id', 'item_id', 'rating']
+            chunk_size: If interaction_chunks is a DataFrame, split it into chunks
+                       of this size. Ignored if interaction_chunks is a generator.
+        """
+        logger.info("Training ALS model with chunked data loading...")
+        
+        # Collect all unique users and items across all chunks
+        all_users = set()
+        all_items = set()
+        
+        if isinstance(interaction_chunks, pd.DataFrame):
+            # Single DataFrame - split into chunks if needed
+            if chunk_size:
+                logger.info(f"Splitting DataFrame into chunks of {chunk_size:,} rows")
+                for i in range(0, len(interaction_chunks), chunk_size):
+                    chunk = interaction_chunks.iloc[i:i + chunk_size]
+                    all_users.update(chunk["user_id"].unique())
+                    all_items.update(chunk["item_id"].unique())
+            else:
+                all_users.update(interaction_chunks["user_id"].unique())
+                all_items.update(interaction_chunks["item_id"].unique())
+        else:
+            # Generator - iterate through all chunks
+            logger.info("Iterating through generator to collect ID mappings...")
+            for chunk in interaction_chunks:
+                all_users.update(chunk["user_id"].unique())
+                all_items.update(chunk["item_id"].unique())
+        
+        # Create ID mappings
+        self.user_id_map = {user: idx for idx, user in enumerate(sorted(all_users))}
+        self.item_id_map = {item: idx for idx, item in enumerate(sorted(all_items))}
+        self.id_to_user = {idx: user for user, idx in self.user_id_map.items()}
+        self.id_to_item = {idx: item for item, idx in self.item_id_map.items()}
+        
+        n_users = len(self.user_id_map)
+        n_items = len(self.item_id_map)
+        logger.info(f"Total unique users: {n_users}, Total unique items: {n_items}")
+        
+        # Build sparse matrix incrementally using COO format (efficient for construction)
+        logger.info("Building sparse matrix incrementally...")
+        
+        row_list = []
+        col_list = []
+        rating_list = []
+        total_rows = 0
+        
+        if isinstance(interaction_chunks, pd.DataFrame):
+            chunks_to_process = []
+            if chunk_size:
+                for i in range(0, len(interaction_chunks), chunk_size):
+                    chunks_to_process.append(interaction_chunks.iloc[i:i + chunk_size])
+            else:
+                chunks_to_process = [interaction_chunks]
+        else:
+            chunks_to_process = interaction_chunks
+        
+        for chunk_idx, chunk in enumerate(chunks_to_process):
+            rows = chunk["user_id"].map(self.user_id_map).values
+            cols = chunk["item_id"].map(self.item_id_map).values
+            ratings = chunk["rating"].values
+            
+            row_list.extend(rows)
+            col_list.extend(cols)
+            rating_list.extend(ratings)
+            total_rows += len(chunk)
+            
+            if (chunk_idx + 1) % 10 == 0:
+                logger.info(f"Processed {chunk_idx + 1} chunks, {total_rows:,} rows so far")
+        
+        logger.info(f"Total rows collected: {total_rows:,}")
+        
+        # Create sparse matrix from collected data
+        R = sparse.coo_matrix(
+            (rating_list, (row_list, col_list)),
+            shape=(n_users, n_items),
+            dtype=np.float32
+        ).tocsr()
+        
+        logger.info(f"Built interaction matrix: {n_users} users × {n_items} items, "
+                   f"{R.nnz} non-zero entries")
+        
+        # Compute biases from the final sparse matrix
+        self.global_mean = R.data.mean() if R.nnz > 0 else 0.0
+        
+        # Compute user and item biases
+        user_means = np.array(R.mean(axis=1)).flatten()
+        item_means = np.array(R.mean(axis=0)).flatten()
+        
+        # Handle zero-mean rows/cols (users/items with no ratings)
+        user_means[user_means == 0] = self.global_mean
+        item_means[item_means == 0] = self.global_mean
+        
+        self.user_biases = {
+            self.id_to_user[idx]: bias - self.global_mean
+            for idx, bias in enumerate(user_means)
+        }
+        self.item_biases = {
+            self.id_to_item[idx]: bias - self.global_mean
+            for idx, bias in enumerate(item_means)
+        }
+        
+        # Train ALS model
+        if self.use_bpr:
+            from implicit.bpr import BayesianPersonalizedRanking
+            self.model = BayesianPersonalizedRanking(
+                n_factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                num_threads=4,
+                random_state=42
+            )
+            self.model.fit(R)
+        else:
+            from implicit.als import AlternatingLeastSquares
+            self.model = AlternatingLeastSquares(
+                factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                use_native=True,
+                use_cg=True,
+                num_threads=4,
+                random_state=42
+            )
+            self.model.fit(R)
+        
+        logger.info("ALS training completed with chunked data loading")
+    
+    def predict(self, user_id: str, item_ids: list[str]) -> list[float]:
+        """Predict ratings for user-item pairs.
+        
+        Args:
+            user_id: User ID
+            item_ids: List of item IDs
         
         Returns:
-            List of top-k problem IDs
+            List of predicted ratings
         """
-        # Uses base class implementation: score all candidates and return top-k
-        scores = self.predict(user_id, candidate_problem_ids)
-        top_indices = np.argsort(scores)[::-1][:k]
-        return [candidate_problem_ids[i] for i in top_indices]
+        if self.model is None:
+            raise ValueError("Model not trained yet")
+        
+        # Handle cold start users
+        if user_id not in self.user_id_map:
+            return [
+                self.global_mean + self.item_biases.get(item, 0.0)
+                for item in item_ids
+            ]
+        
+        user_idx = self.user_id_map[user_id]
+        item_indices = [
+            self.item_id_map[item] for item in item_ids
+            if item in self.item_id_map
+        ]
+        
+        if not item_indices:
+            return [
+                self.global_mean + self.user_biases.get(user_id, 0.0)
+                for _ in item_ids
+            ]
+        
+        # Get predictions from model
+        if self.use_bpr:
+            # BPR returns scores, not ratings
+            scores = self.model.user_item_score(user_idx, item_indices)
+            predictions = scores.tolist()
+        else:
+            # ALS returns ratings
+            ratings = self.model.user_item_score(user_idx, item_indices)
+            predictions = ratings.tolist()
+        
+        # Add biases
+        user_bias = self.user_biases.get(user_id, 0.0)
+        final_predictions = []
+        for i, item in enumerate(item_ids):
+            if item in self.item_id_map:
+                item_bias = self.item_biases.get(item, 0.0)
+                final_predictions.append(
+                    self.global_mean + user_bias + item_bias + predictions[i]
+                )
+            else:
+                final_predictions.append(
+                    self.global_mean + user_bias
+                )
+        
+        return final_predictions
     
     def get_similar_problems(self, problem_id: str, n: int = 10) -> list[tuple[str, float]]:
-        """Get problems similar to the given problem.
+        """Get similar problems based on user interaction patterns.
         
         Args:
             problem_id: Problem ID to find similar problems for
             n: Number of similar problems to return
         
         Returns:
-            List of (problem_id, similarity) tuples
+            List of (problem_id, similarity_score) tuples
         """
-        # TODO: Implement similarity search using model.similar_items()
-        logger.info("TODO: Implement similar problems search")
-        return []
+        if self.model is None:
+            raise ValueError("Model not trained yet")
+        
+        if problem_id not in self.item_id_map:
+            return []
+        
+        item_idx = self.item_id_map[problem_id]
+        
+        # Get similar items
+        similar_indices = self.model.similar_items(item_idx, n=n)
+        
+        results = []
+        for idx, score in zip(similar_indices[0], similar_indices[1]):
+            problem = self.id_to_item[idx]
+            results.append((problem, float(score)))
+        
+        return results
     
     def get_similar_users(self, user_id: str, n: int = 10) -> list[tuple[str, float]]:
-        """Get users similar to the given user.
+        """Get similar users based on interaction patterns.
         
         Args:
             user_id: User ID to find similar users for
             n: Number of similar users to return
         
         Returns:
-            List of (user_id, similarity) tuples
+            List of (user_id, similarity_score) tuples
         """
-        # TODO: Implement similarity search using model.similar_users()
-        logger.info("TODO: Implement similar users search")
-        return []
-    
-    def save(self, output_dir: str | Path) -> None:
-        """Save model artifacts to disk.
+        if self.model is None:
+            raise ValueError("Model not trained yet")
         
-        Args:
-            output_dir: Directory to save artifacts
-        """
-        # TODO: Implement model serialization
-        # Save:
-        # - Model weights
-        # - ID mappings
-        # - Bias terms
-        # - Metadata (latent_dim, regularization, etc.)
-        logger.info("TODO: Implement model saving")
-    
-    @classmethod
-    def load(cls, model_dir: str | Path) -> "ALSRecommender":
-        """Load a trained model from disk.
+        if user_id not in self.user_id_map:
+            return []
         
-        Args:
-            model_dir: Directory containing saved model artifacts
+        user_idx = self.user_id_map[user_id]
         
-        Returns:
-            Loaded ALSRecommender instance
-        """
-        # TODO: Implement model deserialization
-        # Load:
-        # - Model weights
-        # - ID mappings
-        # - Bias terms
-        # - Metadata
-        logger.info("TODO: Implement model loading")
-        return cls()
-
-
-class ContentBasedRecommender(BaseRecommender):
-    """Content-based filtering using problem tags and features.
-    
-    This model recommends problems based on tag similarity and
-    difficulty matching, useful for cold-start scenarios.
-    """
-    
-    def __init__(self):
-        """Initialize the content-based recommender."""
-        self.problem_features: dict[str, dict] = {}
-        self.user_profile: dict[str, dict] = {}
-        self._fitted = False
-    
-    def fit(
-        self,
-        interactions: pd.DataFrame,
-        problem_features_df: Optional[pd.DataFrame] = None
-    ) -> "ContentBasedRecommender":
-        """Train the content-based model.
+        # Get similar users
+        similar_indices = self.model.similar_users(user_idx, n=n)
         
-        Args:
-            interactions: Interaction data
-            problem_features_df: DataFrame with problem features
+        results = []
+        for idx, score in zip(similar_indices[0], similar_indices[1]):
+            user = self.id_to_user[idx]
+            results.append((user, float(score)))
         
-        Returns:
-            self for method chaining
-        """
-        # TODO: Implement content-based training
-        # Steps:
-        # 1. Build problem feature vectors from problem_features_df
-        # 2. Build user profiles from interaction history
-        # 3. Compute tag preferences and difficulty preferences
-        # 4. Store profiles and features
-        # 5. Set _fitted = True
-        
-        logger.info("TODO: Implement content-based training")
-        return self
-    
-    def _compute_tag_similarity(self, tags1: set, tags2: set) -> float:
-        """Compute Jaccard similarity between two tag sets.
-        
-        Args:
-            tags1: First tag set
-            tags2: Second tag set
-        
-        Returns:
-            Jaccard similarity score
-        """
-        # TODO: Implement Jaccard similarity
-        logger.info("TODO: Implement tag similarity")
-        return 0.0
-    
-    def _compute_difficulty_match(self, user_diff: dict, problem_diff: str) -> float:
-        """Compute how well a problem difficulty matches user preference.
-        
-        Args:
-            user_diff: User's difficulty preference dictionary
-            problem_diff: Problem difficulty label
-        
-        Returns:
-            Match score
-        """
-        # TODO: Implement difficulty matching
-        logger.info("TODO: Implement difficulty matching")
-        return 0.5
-    
-    def predict(self, user_id: str, problem_ids: list[str]) -> np.ndarray:
-        """Predict scores based on content similarity.
-        
-        Args:
-            user_id: User ID to predict for
-            problem_ids: List of problem IDs to score
-        
-        Returns:
-            Array of predicted scores
-        """
-        # TODO: Implement content-based prediction
-        # Steps:
-        # 1. Get user profile
-        # 2. For each problem, compute:
-        #    - Tag similarity (Jaccard)
-        #    - Difficulty match
-        #    - Acceptance rate factor
-        # 3. Combine into final score
-        # 4. Return predictions
-        
-        logger.info("TODO: Implement content-based prediction")
-        return np.array([])
+        return results
     
     def recommend(
         self,
         user_id: str,
-        candidate_problem_ids: list[str],
-        k: int = 10
-    ) -> list[str]:
-        """Return top-k recommendations based on content similarity.
+        n: int = 10,
+        exclude_seen: bool = True,
+        seen_problems: Optional[list[str]] = None
+    ) -> list[tuple[str, float]]:
+        """Generate top-N recommendations for a user.
         
         Args:
-            user_id: User ID to recommend for
-            candidate_problem_ids: Pool of candidate problem IDs
-            k: Number of recommendations to return
+            user_id: User ID
+            n: Number of recommendations
+            exclude_seen: Whether to exclude problems the user has already solved
+            seen_problems: List of problem IDs to exclude
         
         Returns:
-            List of top-k problem IDs
+            List of (problem_id, score) tuples
         """
-        # Uses base class implementation
-        scores = self.predict(user_id, candidate_problem_ids)
-        top_indices = np.argsort(scores)[::-1][:k]
-        return [candidate_problem_ids[i] for i in top_indices]
+        if self.model is None:
+            raise ValueError("Model not trained yet")
+        
+        # Handle cold start users
+        if user_id not in self.user_id_map:
+            # Recommend most popular problems
+            return self._recommend_popular(n)
+        
+        user_idx = self.user_id_map[user_id]
+        
+        # Get all problem scores
+        scores = self.model.user_item_score(user_idx)
+        
+        # Filter out seen problems
+        if exclude_seen and seen_problems:
+            seen_indices = [
+                idx for idx, item in enumerate(self.id_to_item.values())
+                if item in seen_problems
+            ]
+            scores = np.delete(scores, seen_indices)
+        
+        # Get top-N
+        top_indices = np.argsort(scores)[-n:][::-1]
+        
+        results = []
+        for idx in top_indices:
+            problem = self.id_to_item[idx]
+            score = scores[idx]
+            results.append((problem, float(score)))
+        
+        return results
+    
+    def _recommend_popular(self, n: int) -> list[tuple[str, float]]:
+        """Recommend most popular problems (for cold start users).
+        
+        Args:
+            n: Number of recommendations
+        
+        Returns:
+            List of (problem_id, popularity_score) tuples
+        """
+        # Use item biases as popularity proxy
+        popularity = [
+            (item, bias)
+            for item, bias in self.item_biases.items()
+        ]
+        popularity.sort(key=lambda x: x[1], reverse=True)
+        
+        return popularity[:n]
+    
+    def save(self, output_dir: str | Path) -> None:
+        """Save the trained model to disk.
+        
+        Args:
+            output_dir: Directory to save the model
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save model metadata
+        metadata = {
+            "latent_dim": self.latent_dim,
+            "regularization": self.regularization,
+            "iterations": self.iterations,
+            "use_bpr": self.use_bpr,
+            "global_mean": float(self.global_mean),
+            "user_biases": self.user_biases,
+            "item_biases": self.item_biases,
+            "user_id_map": self.user_id_map,
+            "item_id_map": self.item_id_map,
+            "id_to_user": self.id_to_user,
+            "id_to_item": self.id_to_item,
+        }
+        
+        metadata_path = output_dir / "metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        # Save latent factors
+        if self.model is not None:
+            user_factors = self.model.user_factors
+            item_factors = self.model.item_factors
+            
+            np.save(output_dir / "user_factors.npy", user_factors)
+            np.save(output_dir / "item_factors.npy", item_factors)
+        
+        logger.info(f"Model saved to {output_dir}")
+    
+    def load(self, input_dir: str | Path) -> None:
+        """Load a trained model from disk.
+        
+        Args:
+            input_dir: Directory containing the saved model
+        """
+        input_dir = Path(input_dir)
+        
+        # Load metadata
+        metadata_path = input_dir / "metadata.json"
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+        
+        self.latent_dim = metadata["latent_dim"]
+        self.regularization = metadata["regularization"]
+        self.iterations = metadata["iterations"]
+        self.use_bpr = metadata["use_bpr"]
+        self.global_mean = metadata["global_mean"]
+        self.user_biases = metadata["user_biases"]
+        self.item_biases = metadata["item_biases"]
+        self.user_id_map = metadata["user_id_map"]
+        self.item_id_map = metadata["item_id_map"]
+        self.id_to_user = metadata["id_to_user"]
+        self.id_to_item = metadata["id_to_item"]
+        
+        # Load latent factors
+        user_factors = np.load(input_dir / "user_factors.npy")
+        item_factors = np.load(input_dir / "item_factors.npy")
+        
+        # Reconstruct model
+        if self.use_bpr:
+            from implicit.bpr import BayesianPersonalizedRanking
+            self.model = BayesianPersonalizedRanking(
+                n_factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                num_threads=4,
+                random_state=42
+            )
+        else:
+            from implicit.als import AlternatingLeastSquares
+            self.model = AlternatingLeastSquares(
+                factors=self.latent_dim,
+                regularization=self.regularization,
+                iterations=self.iterations,
+                use_native=True,
+                use_cg=True,
+                num_threads=4,
+                random_state=42
+            )
+        
+        self.model.user_factors = user_factors
+        self.model.item_factors = item_factors
+        
+        logger.info(f"Model loaded from {input_dir}")

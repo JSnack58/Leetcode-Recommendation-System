@@ -13,10 +13,6 @@ import pandas as pd
 from scipy import sparse
 from loguru import logger
 
-from lrs.utils.logging import get_logger
-
-logger = get_logger(__name__)
-
 
 class FeatureStore:
     """Unified feature store for all recommendation models.
@@ -139,240 +135,99 @@ class FeatureStore:
         
         Args:
             score_column: Column to use for matrix values
-            include_unsolved: Whether to include unsolved attempts
+            include_unsolved: Whether to include unsolved interactions
         
         Returns:
             Sparse CSR matrix of shape (n_users, n_problems)
         """
+        interactions = self.interactions.copy()
+        
+        if not include_unsolved:
+            interactions = interactions[interactions["solved"] == True]
+        
         user_map, _ = self.get_user_problem_map()
         problem_map, _ = self.get_problem_id_map()
         
-        df = self.interactions.copy()
-        if not include_unsolved:
-            df = df[df["solved"] == True]
-        
-        rows = df["user_id"].map(user_map).astype(int).values
-        cols = df["problem_id"].map(problem_map).astype(int).values
-        data = df[score_column].values
+        rows = interactions["user_id"].map(user_map).values
+        cols = interactions["problem_id"].map(problem_map).values
+        values = interactions[score_column].values
         
         n_users = len(user_map)
         n_problems = len(problem_map)
         
-        logger.debug(f"Building {n_users} × {n_problems} interaction matrix")
-        
         matrix = sparse.csr_matrix(
-            (data, (rows, cols)),
+            (values, (rows, cols)),
             shape=(n_users, n_problems),
             dtype=np.float32
         )
         
-        logger.info(f"Built interaction matrix with {matrix.nnz:,} non-zero entries "
-                   f"({100*matrix.nnz/(n_users*n_problems):.2f}% density)")
+        logger.info(f"Built interaction matrix: {n_users} × {n_problems}, "
+                   f"{matrix.nnz} non-zero entries")
         
         return matrix
     
-    def get_user_features_matrix(self) -> tuple[np.ndarray, list[str]]:
-        """Get dense matrix of user features.
+    def get_user_features_matrix(self) -> tuple[np.ndarray, dict[str, int]]:
+        """Get user features matrix for models that need it.
         
         Returns:
-            Tuple of (feature_matrix, feature_names)
+            Tuple of (features_matrix, user_id_to_idx)
         """
-        if self.user_features.empty:
-            logger.warning("No user features available")
-            return np.array([]), []
+        user_map, _ = self.get_user_problem_map()
         
-        # Get numeric columns only
-        numeric_cols = self.user_features.select_dtypes(include=[np.number]).columns.tolist()
-        if not numeric_cols:
-            logger.warning("No numeric user features available")
-            return np.array([]), []
+        # Ensure user features are loaded
+        _ = self.user_features
         
-        feature_matrix = self.user_features[numeric_cols].values
-        logger.info(f"Loaded user features matrix with shape {feature_matrix.shape}")
-        
-        return feature_matrix, numeric_cols
-    
-    def get_problem_features_matrix(self) -> tuple[np.ndarray, list[str]]:
-        """Get dense matrix of problem features.
-        
-        Returns:
-            Tuple of (feature_matrix, feature_names)
-        """
-        if self.problem_features.empty:
-            logger.warning("No problem features available")
-            return np.array([]), []
-        
-        # Get numeric columns only
-        numeric_cols = self.problem_features.select_dtypes(include=[np.number]).columns.tolist()
-        if not numeric_cols:
-            logger.warning("No numeric problem features available")
-            return np.array([]), []
-        
-        feature_matrix = self.problem_features[numeric_cols].values
-        logger.info(f"Loaded problem features matrix with shape {feature_matrix.shape}")
-        
-        return feature_matrix, numeric_cols
-    
-    def get_tag_vectors(
-        self,
-        tag_column: str = "tags"
-    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-        """Build tag vectors for content-based filtering.
-        
-        Args:
-            tag_column: Column containing tags
-        
-        Returns:
-            Tuple of (user_tag_vectors, problem_tag_vectors)
-        """
-        # Build problem tag vectors (one-hot encoding)
-        all_tags = set()
-        for tags in self.problem_features[tag_column]:
-            if isinstance(tags, list):
-                all_tags.update(tags)
-        
-        tag_list = sorted(all_tags)
-        tag_to_idx = {tag: idx for idx, tag in enumerate(tag_list)}
-        
-        # Problem tag vectors
-        problem_tag_vectors = {}
-        for _, row in self.problem_features.iterrows():
-            pid = row["problem_id"]
-            tags = row.get(tag_column, [])
-            if isinstance(tags, list):
-                vector = np.zeros(len(tag_list), dtype=np.float32)
-                for tag in tags:
-                    if tag in tag_to_idx:
-                        vector[tag_to_idx[tag]] = 1.0
-                problem_tag_vectors[pid] = vector
-        
-        # User tag preference vectors (average of solved problems)
-        user_tag_vectors = {}
-        for user_id in self.user_features["user_id"].unique():
-            user_solved = self.interactions[
-                (self.interactions["user_id"] == user_id) & 
-                (self.interactions["solved"] == True)
-            ]
-            
-            if user_solved.empty:
-                user_tag_vectors[user_id] = np.zeros(len(tag_list), dtype=np.float32)
-                continue
-            
-            tag_counts = np.zeros(len(tag_list), dtype=np.float32)
-            for _, row in user_solved.iterrows():
-                tags = row.get("tags", [])
-                if isinstance(tags, list):
-                    for tag in tags:
-                        if tag in tag_to_idx:
-                            tag_counts[tag_to_idx[tag]] += 1
-            
-            # Normalize by number of solved problems
-            n_solved = len(user_solved)
-            user_tag_vectors[user_id] = tag_counts / max(n_solved, 1)
-        
-        logger.info(f"Built tag vectors for {len(tag_list)} tags")
-        logger.info(f"Built tag vectors for {len(user_tag_vectors)} users and "
-                   f"{len(problem_tag_vectors)} problems")
-        
-        return user_tag_vectors, problem_tag_vectors
-    
-    def get_temporal_split(
-        self,
-        n_train: int = 250,
-        n_val: int = 30,
-        n_test: int = 61
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Split interactions into temporal train/val/test sets.
-        
-        Args:
-            n_train: Number of contests for training
-            n_val: Number of contests for validation
-            n_test: Number of contests for testing
-        
-        Returns:
-            Tuple of (train_df, val_df, test_df)
-        """
-        # Get unique contests sorted by ID
-        contests = sorted(self.interactions["contest_id"].unique())
-        n_contests = len(contests)
-        
-        if n_contests < n_train + n_val + n_test:
-            logger.warning(
-                f"Only {n_contests} contests available, adjusting split ratios"
-            )
-            n_train = max(1, int(n_contests * 0.7))
-            n_val = max(1, int(n_contests * 0.1))
-            n_test = n_contests - n_train - n_val
-        
-        train_contests = contests[:n_train]
-        val_contests = contests[n_train:n_train + n_val]
-        test_contests = contests[n_train + n_val:]
-        
-        train_df = self.interactions[self.interactions["contest_id"].isin(train_contests)]
-        val_df = self.interactions[self.interactions["contest_id"].isin(val_contests)]
-        test_df = self.interactions[self.interactions["contest_id"].isin(test_contests)]
-        
-        logger.info(f"Temporal split: {len(train_df):,} train, "
-                   f"{len(val_df):,} val, {len(test_df):,} test")
-        
-        return train_df, val_df, test_df
-    
-    def get_user_rating_percentile(self, user_id: str) -> float:
-        """Get user's rating percentile among all users.
-        
-        Args:
-            user_id: User ID to get percentile for
-        
-        Returns:
-            Percentile rank (0-1)
-        """
-        ratings = self.user_features["user_rating"].dropna()
-        if ratings.empty:
-            return 0.5
-        
-        user_rating = self.user_features[self.user_features["user_id"] == user_id]["user_rating"]
-        if user_rating.empty:
-            return 0.5
-        
-        rating = user_rating.iloc[0]
-        percentile = (ratings < rating).sum() / len(ratings)
-        return percentile
-    
-    def get_peer_group(
-        self,
-        user_id: str,
-        rating_window: float = 100.0
-    ) -> pd.DataFrame:
-        """Get peer group of users within rating window.
-        
-        Args:
-            user_id: User ID to find peers for
-            rating_window: Rating window in points (±)
-        
-        Returns:
-            DataFrame of peer user features
-        """
-        user_rating = self.user_features[self.user_features["user_id"] == user_id]["user_rating"]
-        if user_rating.empty:
-            return pd.DataFrame()
-        
-        rating = user_rating.iloc[0]
-        peers = self.user_features[
-            (self.user_features["user_rating"] >= rating - rating_window) &
-            (self.user_features["user_rating"] <= rating + rating_window) &
-            (self.user_features["user_id"] != user_id)
+        # Create feature matrix aligned with user IDs
+        feature_cols = [
+            col for col in self.user_features.columns
+            if col not in ["user_id", "user_id_idx"]
         ]
         
-        return peers
-
-
-def create_feature_store(store_path: str | Path) -> FeatureStore:
-    """Factory function to create a FeatureStore instance.
+        if not feature_cols:
+            logger.warning("No feature columns found in user_features")
+            return np.array([]), user_map
+        
+        # Create matrix with users in order
+        n_users = len(user_map)
+        features = np.zeros((n_users, len(feature_cols)), dtype=np.float32)
+        
+        for user_id, idx in user_map.items():
+            if user_id in self.user_features["user_id"].values:
+                user_row = self.user_features[self.user_features["user_id"] == user_id].iloc[0]
+                features[idx] = user_row[feature_cols].values.astype(np.float32)
+        
+        return features, user_map
     
-    Args:
-        store_path: Path to the feature store directory
-    
-    Returns:
-        Configured FeatureStore instance
-    """
-    return FeatureStore(store_path)
+    def get_problem_features_matrix(self) -> tuple[np.ndarray, dict[str, int]]:
+        """Get problem features matrix for models that need it.
+        
+        Returns:
+            Tuple of (features_matrix, problem_id_to_idx)
+        """
+        problem_map, _ = self.get_problem_id_map()
+        
+        # Ensure problem features are loaded
+        _ = self.problem_features
+        
+        # Create feature matrix aligned with problem IDs
+        feature_cols = [
+            col for col in self.problem_features.columns
+            if col not in ["problem_id", "problem_id_idx"]
+        ]
+        
+        if not feature_cols:
+            logger.warning("No feature columns found in problem_features")
+            return np.array([]), problem_map
+        
+        # Create matrix with problems in order
+        n_problems = len(problem_map)
+        features = np.zeros((n_problems, len(feature_cols)), dtype=np.float32)
+        
+        for problem_id, idx in problem_map.items():
+            if problem_id in self.problem_features["problem_id"].values:
+                problem_row = self.problem_features[
+                    self.problem_features["problem_id"] == problem_id
+                ].iloc[0]
+                features[idx] = problem_row[feature_cols].values.astype(np.float32)
+        
+        return features, problem_map
