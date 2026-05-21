@@ -21,33 +21,48 @@ See [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 
 ## Quickstart
 
+All commands below use the project **`.venv`** — do not use system `python`/`pip` directly.
+
 ```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create environment and install dependencies
-uv sync
-
-# Install advanced model dependencies (PyTorch, PyG) — optional, heavy
-uv sync --group advanced
+# One-time: create and install into .venv
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 
 # Copy environment config
 cp .env.example .env
-# Edit .env with your paths
 
 # Build processed data + features (auto-detects combined_contest_data.jsonl at repo root)
-python scripts/build_dataset.py
-# Or explicitly: python scripts/build_dataset.py --input combined_contest_data.jsonl
-# Dev sample: python scripts/build_dataset.py --sample 5000
+.venv/bin/python scripts/build_dataset.py
+# Or: .venv/bin/python scripts/build_dataset.py --input combined_contest_data.jsonl
+# Dev sample: .venv/bin/python scripts/build_dataset.py --sample 5000
 
 # Train ALS + content + ensemble
-python scripts/train_baseline.py --model all
+.venv/bin/python scripts/train_baseline.py --model all
 
 # Generate tiered recommendations
-python scripts/generate_recommendations.py --user-slug YOUR_SLUG --output recommendations.json
+.venv/bin/python scripts/generate_recommendations.py --user-slug YOUR_SLUG --output recommendations.json
 
 # Run evaluation
-python scripts/evaluate.py
+.venv/bin/python scripts/evaluate.py
+
+# Web UI (Flask) — must use .venv
+.venv/bin/python web/app.py
+# Or: ./web/run.sh
+# Or: make web
+# Open http://127.0.0.1:5001
+```
+
+Activate the venv once per shell if you prefer shorter commands:
+
+```bash
+source .venv/bin/activate
+python scripts/build_dataset.py   # uses venv python while activated
+```
+
+Wrapper script (always uses `.venv/bin/python`):
+
+```bash
+./scripts/run.sh scripts/build_dataset.py --input combined_contest_data.jsonl
 ```
 
 ## Project Structure
@@ -59,24 +74,19 @@ notebooks/      Exploratory analysis and model prototyping
 src/lrs/        Main Python package
 models/         Serialized model artifacts (gitignored)
 scripts/        CLI entrypoints for training, evaluation, inference
+web/            Flask UI
 tests/          Unit and integration tests
 ```
 
 ## Development
 
 ```bash
-# Lint
-uv run ruff check src/ tests/
-
-# Type check
-uv run mypy src/
-
-# Run tests
-uv run pytest tests/
-
-# Or use make shortcuts
+make install    # .venv/bin/pip install -e ".[dev]"
 make lint
 make test
+make build      # dataset pipeline
+make train      # train all baseline models
+make web        # Flask UI on :5001
 ```
 
 ## Documentation

@@ -84,11 +84,11 @@ class ContentBasedRecommender(BaseRecommender):
         return scores
 
     def predict(self, user_id: str, problem_ids: list[str]) -> np.ndarray:
+        from lrs.models.score_utils import calibrate_or_spread_raw
+
         raw = self._raw_scores(user_id, problem_ids)
-        if self.calibrator is not None:
-            return self.calibrator.predict(raw)
-        # Map cosine [-1,1] to [0,1]
-        return (raw + 1.0) / 2.0
+        scores, _ = calibrate_or_spread_raw(raw, self.calibrator)
+        return scores
 
     def save(self, output_dir: str | Path) -> None:
         output_dir = Path(output_dir)

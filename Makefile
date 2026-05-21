@@ -1,53 +1,58 @@
-.PHONY: install install-advanced lint typecheck test train-baseline train-advanced evaluate notebook clean
+# All targets use the project .venv — never system Python.
+PY := ./.venv/bin/python
+PIP := ./.venv/bin/pip
 
-# Install base dependencies
-install:
-	uv sync
+.PHONY: install install-advanced venv lint typecheck test train-baseline train-advanced evaluate web notebook clean build train recommend
 
-# Install including heavy advanced model deps (PyTorch, PyG)
-install-advanced:
-	uv sync --group advanced
+venv:
+	@test -x $(PY) || (echo "Run: python3 -m venv .venv && $(PIP) install -e \".[dev]\"" && exit 1)
 
-# Lint with ruff
-lint:
-	uv run ruff check src/ tests/ scripts/
-	uv run ruff format --check src/ tests/ scripts/
+# Create .venv and install package + dev deps
+install: venv
+	$(PIP) install -e ".[dev]"
 
-# Type check
-typecheck:
-	uv run mypy src/
+install-advanced: venv
+	$(PIP) install -e ".[advanced,dev]"
 
-# Run all tests
-test:
-	uv run pytest tests/ -v
+lint: venv
+	$(PY) -m ruff check src/ tests/ scripts/ web/
+	$(PY) -m ruff format --check src/ tests/ scripts/ web/
 
-# Run tests with coverage report
-coverage:
-	uv run pytest tests/ --cov=lrs --cov-report=term-missing
+typecheck: venv
+	$(PY) -m mypy src/
 
-# Train a baseline model (usage: make train-baseline MODEL=svd)
+test: venv
+	$(PY) -m pytest tests/ -v
+
+coverage: venv
+	$(PY) -m pytest tests/ --cov=lrs --cov-report=term-missing
+
 MODEL ?= svd
-train-baseline:
-	uv run python scripts/train_baseline.py --model $(MODEL)
+train-baseline: venv
+	$(PY) scripts/train_baseline.py --model $(MODEL)
 
-# Train an advanced model (usage: make train-advanced MODEL=ncf)
-train-advanced:
-	uv run python scripts/train_advanced.py --model $(MODEL)
+train-advanced: venv
+	$(PY) scripts/train_advanced.py --model $(MODEL)
 
-# Run offline evaluation suite
-evaluate:
-	uv run python scripts/evaluate.py
+evaluate: venv
+	$(PY) scripts/evaluate.py
 
-# Generate batch recommendations (usage: make recommend USER=123)
+web: venv
+	$(PY) web/app.py
+
+build: venv
+	$(PY) scripts/build_dataset.py
+
+train: venv
+	$(PY) scripts/train_baseline.py --model all
+
 USER ?= all
-recommend:
-	uv run python scripts/generate_recommendations.py --user $(USER)
+recommend: venv
+	$(PY) scripts/generate_recommendations.py --user $(USER)
 
-# Strip Jupyter notebook outputs before committing
-notebook-clean:
-	uv run nbstripout notebooks/**/*.ipynb
+notebook-clean: venv
+	$(PY) -m nbstripout notebooks/**/*.ipynb
 
-# Remove generated artifacts
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete

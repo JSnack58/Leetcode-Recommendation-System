@@ -121,11 +121,11 @@ class ALSRecommender(BaseRecommender):
         return scores
 
     def predict(self, user_id: str, problem_ids: list[str]) -> np.ndarray:
+        from lrs.models.score_utils import calibrate_or_spread_raw
+
         raw = self._raw_scores(user_id, problem_ids)
-        if self.calibrator is not None:
-            return self.calibrator.predict(raw)
-        # Sigmoid fallback
-        return 1.0 / (1.0 + np.exp(-raw))
+        scores, _ = calibrate_or_spread_raw(raw, self.calibrator)
+        return scores
 
     def save(self, output_dir: str | Path) -> None:
         output_dir = Path(output_dir)

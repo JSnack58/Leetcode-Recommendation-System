@@ -59,6 +59,7 @@ ENSEMBLE_W_CONTENT: float = float(os.getenv("ENSEMBLE_W_CONTENT", "0.3"))
 GRAPH_BOOST_ALPHA: float = float(os.getenv("GRAPH_BOOST_ALPHA", "0.05"))
 
 SIMILARITY_GRAPH_GML = DATA_DIR / "leetcode_problems_graph.gml"
+NEETCODE150_PATH = Path(os.getenv("NEETCODE150_PATH", _REPO_ROOT / "neetcode150.json"))
 
 # ---------------------------------------------------------------------------
 # Logging

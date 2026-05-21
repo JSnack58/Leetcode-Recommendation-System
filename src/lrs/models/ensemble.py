@@ -11,6 +11,7 @@ from lrs.config import ENSEMBLE_W_ALS, ENSEMBLE_W_CONTENT, GRAPH_BOOST_ALPHA
 from lrs.models.base import BaseRecommender
 from lrs.models.baseline.als import ALSRecommender
 from lrs.models.baseline.content_based import ContentBasedRecommender
+from lrs.models.score_utils import has_score_variance, minmax_spread
 from lrs.recommendation.graph_reranker import SimilarityGraphReranker
 from lrs.utils.logging import get_logger
 
@@ -71,8 +72,17 @@ class EnsembleRecommender(BaseRecommender):
 
         p_als = self.als_model.predict(user_id, problem_ids)
         p_content = self.content_model.predict(user_id, problem_ids)
-        total_w = self.w_als + self.w_content
-        scores = (self.w_als * p_als + self.w_content * p_content) / total_w
+
+        # If ALS has no signal (e.g. problems absent from training matrix), lean on tags
+        if has_score_variance(p_als):
+            total_w = self.w_als + self.w_content
+            scores = (self.w_als * p_als + self.w_content * p_content) / total_w
+        elif has_score_variance(p_content):
+            scores = p_content.copy()
+        else:
+            scores = (self.w_als * p_als + self.w_content * p_content) / (
+                self.w_als + self.w_content
+            )
 
         if self.graph_reranker:
             history = self._user_history.get(user_id, [])
@@ -80,7 +90,13 @@ class EnsembleRecommender(BaseRecommender):
             boosts = self.graph_reranker.graph_boost(problem_ids, struggles)
             scores = scores + boosts
 
-        return np.clip(scores, 0.0, 1.0)
+        scores = np.clip(scores, 0.0, 1.0)
+
+        # Final guard: never return identical P(solve) for every candidate
+        if len(problem_ids) > 1 and not has_score_variance(scores):
+            scores = minmax_spread(scores, low=0.3, high=0.8)
+
+        return scores
 
     def predict_components(
         self, user_id: str, problem_ids: list[str]

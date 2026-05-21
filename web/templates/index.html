@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeetCode Problem Recommender</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <h1>LeetCode Problem Recommender</h1>
+      <p class="subtitle">Contest history + peer comparison + problem similarity graph</p>
+    </header>
+
+    <section class="card form-card">
+      <form method="post" class="form">
+        <div class="field">
+          <label for="user_slug">LEETCODE USER SLUG</label>
+          <input
+            id="user_slug"
+            name="user_slug"
+            type="text"
+            placeholder="e.g. foorest"
+            value="{{ slug }}"
+            autocomplete="off"
+          />
+        </div>
+        <div class="field field-count">
+          <label for="count">COUNT</label>
+          <input id="count" name="count" type="number" min="1" max="30" value="{{ count }}" />
+        </div>
+        <button type="submit" class="btn-recommend">Recommend</button>
+      </form>
+      <p class="hint">
+        Find your slug in your LeetCode profile URL:
+        <code>leetcode.com/u/&lt;slug&gt;/</code>.
+        Users in contest data get personalized picks (warm start).
+        Unknown users get the <strong>NeetCode 150</strong> roadmap (cold start).
+        Try <strong>foorest</strong> for warm start.
+      </p>
+    </section>
+
+    {% if result %}
+    <section class="card results-card">
+      {% if result.error %}
+      <p class="error-msg">{{ result.error }}</p>
+      {% else %}
+      <div class="results-header">
+        {% if result.cold_start %}
+        <span class="banner banner-cold">COLD START · NEETCODE 150</span>
+        {% else %}
+        <span class="banner banner-warm">WARM START</span>
+        <span class="stat">Contests: <strong>{{ result.contests }}</strong></span>
+        <span class="stat">Attempted: <strong>{{ result.attempted }}</strong></span>
+        {% endif %}
+        <span class="stat">User: <strong>{{ result.user_slug }}</strong></span>
+      </div>
+      {% if result.message %}
+      <p class="cold-msg">{{ result.message }}</p>
+      {% endif %}
+
+      {% if result.problems %}
+      <ul class="problem-list">
+        {% for p in result.problems %}
+        <li class="problem-item">
+          <div class="problem-top">
+            <h2 class="problem-title">{{ p.title }}</h2>
+            <span class="signal-badge">{{ p.signal_count }} signal{% if p.signal_count != 1 %}s{% endif %}</span>
+          </div>
+          {% for signal in p.signals %}
+          <p class="problem-reason">{{ signal }}</p>
+          {% endfor %}
+          <div class="tags">
+            {% for tag in p.tags %}
+            <span class="tag">{{ tag }}</span>
+            {% endfor %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No recommendations returned for this user.</p>
+      {% endif %}
+      {% endif %}
+    </section>
+    {% endif %}
+  </main>
+</body>
+</html>
